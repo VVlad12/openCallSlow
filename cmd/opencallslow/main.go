@@ -15,6 +15,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sync"
 	"time"
 
@@ -55,6 +56,7 @@ func main() {
 	addr := fs.String("addr", "127.0.0.1:7391", "dashboard listen address")
 	srumFile := fs.String("file", "", "import-srum: read this SRUDB.dat copy instead of the live one")
 	verbose := fs.Bool("v", false, "verbose logging")
+	elevated := fs.Bool("elevated", false, "internal: set when relaunched through the UAC prompt")
 	fs.Usage = func() {
 		fmt.Fprint(os.Stderr, usage)
 		fs.PrintDefaults()
@@ -75,7 +77,22 @@ func main() {
 		out = io.MultiWriter(os.Stderr, f)
 	}
 	log := slog.New(slog.NewTextHandler(out, &slog.HandlerOptions{Level: level}))
-	log.Info("openCallSlow starting", "command", cmd, "os", runtime.GOOS, "data", *dataDir)
+	log.Info("openCallSlow starting", "command", cmd, "os", runtime.GOOS, "data", *dataDir, "admin", isElevated())
+
+	if *elevated {
+		// Own console window: keep it open so the output can be read.
+		defer pause()
+	}
+	needsAdmin := cmd == "run" || cmd == "check" || cmd == "import-srum"
+	if needsAdmin && !isElevated() && !*elevated {
+		log.Warn("not running as administrator — asking Windows for permission (UAC prompt)")
+		if err := relaunchElevated("-data", *dataDir, "-elevated"); err == nil {
+			log.Info("continuing in a new administrator window")
+			return
+		} else {
+			log.Warn("could not get administrator rights; live capture will not work", "err", err)
+		}
+	}
 
 	var err error
 	switch cmd {
@@ -104,6 +121,11 @@ func main() {
 	}
 }
 
+func pause() {
+	fmt.Fprint(os.Stderr, "\nPress Enter to close this window.")
+	fmt.Scanln()
+}
+
 // openLog appends to the log file, starting afresh once it passes 5 MB.
 func openLog(path string) (*os.File, error) {
 	flags := os.O_CREATE | os.O_WRONLY | os.O_APPEND
@@ -115,6 +137,9 @@ func openLog(path string) (*os.File, error) {
 
 func fatal(log *slog.Logger, what string, err error) {
 	log.Error(what+" failed", "err", err)
+	if slices.Contains(os.Args, "-elevated") {
+		pause()
+	}
 	os.Exit(1)
 }
 
