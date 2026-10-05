@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>openCallSlow</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <h1>openCallSlow</h1>
+    <span id="status" class="status" role="status">…</span>
+  </div>
+  <nav class="ranges" aria-label="Time range">
+    <button data-range="1h">Last hour</button>
+    <button data-range="today" class="on">Today</button>
+    <button data-range="24h">24 h</button>
+    <button data-range="7d">7 days</button>
+    <button data-range="30d">30 days</button>
+  </nav>
+</header>
+
+<main>
+  <div id="filters" class="filters" hidden></div>
+
+  <section class="hero">
+    <div class="hero-main">
+      <div class="label">Internet traffic</div>
+      <div id="total" class="hero-value">–</div>
+      <div id="range-label" class="muted"></div>
+    </div>
+    <div class="tile"><div class="label"><i class="key k-in"></i>Downloaded</div><div id="down" class="tile-value">–</div></div>
+    <div class="tile"><div class="label"><i class="key k-out"></i>Uploaded</div><div id="up" class="tile-value">–</div></div>
+    <div class="tile"><div class="label">Local network <span class="muted">(not counted)</span></div><div id="lan" class="tile-value small">–</div></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Over time</h2>
+      <div class="legend"><span><i class="key k-in"></i>Downloaded</span><span><i class="key k-out"></i>Uploaded</span></div>
+    </div>
+    <div id="timeline" class="chart"></div>
+  </section>
+
+  <section class="grid">
+    <div class="card"><h2>Services</h2><p class="hint">What you used — click a row to filter</p><div id="b-service" class="bars"></div></div>
+    <div class="card"><h2>Categories</h2><p class="hint">Kind of activity</p><div id="b-category" class="bars"></div></div>
+    <div class="card"><h2>Apps</h2><p class="hint">Program on this computer</p><div id="b-app" class="bars"></div></div>
+    <div class="card"><h2>Domains</h2><p class="hint">Where the traffic went</p><div id="b-site" class="bars"></div></div>
+    <div class="card"><h2>Network operators</h2><p class="hint">Who runs the servers</p><div id="b-org" class="bars"></div></div>
+    <div class="card"><h2>Countries</h2><p class="hint">Where the operator is registered</p><div id="b-country" class="bars"></div></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>History from Windows (last 30 days)</h2>
+      <span id="srum-note" class="muted"></span>
+    </div>
+    <p class="hint">Windows records hourly network use per app (SRUM). It has no destinations and includes local-network traffic.</p>
+    <div id="srum-days" class="chart short"></div>
+    <div id="srum-apps" class="bars two-col"></div>
+  </section>
+
+  <footer class="notes">
+    <h2>Reading these numbers</h2>
+    <ul>
+      <li>Bytes are counted per program at the network stack, so they include protocol overhead but not Wi-Fi/Ethernet framing.</li>
+      <li>Domains come from the DNS lookups programs make. If your browser uses “secure DNS” (DNS-over-HTTPS), its traffic falls back to the network operator.</li>
+      <li>With a VPN, traffic may be counted twice: once inside the tunnel, once as the VPN's own traffic.</li>
+      <li>Local-network traffic (printer, NAS, other devices at home) is shown separately and is not part of the internet total.</li>
+    </ul>
+  </footer>
+</main>
+
+<div id="tip" class="tip" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>
