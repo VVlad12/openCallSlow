@@ -4,9 +4,11 @@
 package agg
 
 import (
+	"fmt"
 	"log/slog"
 	"net/netip"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/opencallslow/opencallslow/internal/capture"
@@ -36,6 +38,11 @@ type Aggregator struct {
 	mu    sync.Mutex
 	flows map[flowKey]*flow
 
+	// Counters since the last stats log line.
+	packets, dnsAnswers, rows atomic.Uint64
+	withSite, withoutSite     atomic.Uint64 // internet bytes with / without a known domain
+	lastLive                  atomic.Int64  // unix nanos of the last FlushThrottled
+
 	now func() time.Time
 }
 
@@ -54,6 +61,7 @@ func (a *Aggregator) OnPacket(p capture.Packet) {
 	if enrich.Skip(p.Remote) {
 		return
 	}
+	a.packets.Add(1)
 	k := flowKey{minute: a.now().Unix() / 60 * 60, pid: p.PID, remote: p.Remote, proto: p.Proto}
 	a.mu.Lock()
 	f, ok := a.flows[k]
@@ -77,6 +85,7 @@ func (a *Aggregator) OnPacket(p capture.Packet) {
 }
 
 func (a *Aggregator) OnDNS(d capture.DNSAnswer) {
+	a.dnsAnswers.Add(1)
 	a.enr.DNS.Add(d.PID, d.Name, d.Addrs)
 }
 
@@ -117,7 +126,15 @@ func (a *Aggregator) Flush(all bool) error {
 		}
 		r.BytesIn += f.in
 		r.BytesOut += f.out
+		if at.Scope == enrich.ScopeInternet {
+			if at.Site != "" {
+				a.withSite.Add(f.in + f.out)
+			} else {
+				a.withoutSite.Add(f.in + f.out)
+			}
+		}
 	}
+	a.rows.Add(uint64(len(merged)))
 	rows := make([]store.Row, 0, len(merged))
 	for _, r := range merged {
 		rows = append(rows, *r)
@@ -131,6 +148,8 @@ func (a *Aggregator) Run(interval time.Duration, stop <-chan struct{}) {
 	defer t.Stop()
 	prune := time.NewTicker(time.Hour)
 	defer prune.Stop()
+	stats := time.NewTimer(time.Minute) // first report soon, then every 5 minutes
+	defer stats.Stop()
 	for {
 		select {
 		case <-stop:
@@ -144,6 +163,36 @@ func (a *Aggregator) Run(interval time.Duration, stop <-chan struct{}) {
 			}
 		case <-prune.C:
 			a.enr.DNS.Prune(24 * time.Hour)
+		case <-stats.C:
+			a.logStats()
+			stats.Reset(5 * time.Minute)
 		}
+	}
+}
+
+// logStats reports activity since the previous report, mainly to diagnose
+// domain attribution.
+func (a *Aggregator) logStats() {
+	with, without := a.withSite.Swap(0), a.withoutSite.Swap(0)
+	share := 0.0
+	if with+without > 0 {
+		share = float64(with) / float64(with+without) * 100
+	}
+	a.log.Info("capture stats",
+		"packets", a.packets.Swap(0), "dnsAnswers", a.dnsAnswers.Swap(0), "rowsWritten", a.rows.Swap(0),
+		"knownDNSAddrs", a.enr.DNS.Len(), "internetBytes", with+without,
+		"bytesWithDomainPct", fmt.Sprintf("%.0f", share))
+}
+
+// FlushThrottled writes everything pending, at most once per interval. The
+// dashboard calls it so the current minute shows up without waiting.
+func (a *Aggregator) FlushThrottled(interval time.Duration) {
+	now := a.now().UnixNano()
+	last := a.lastLive.Load()
+	if now-last < int64(interval) || !a.lastLive.CompareAndSwap(last, now) {
+		return
+	}
+	if err := a.Flush(true); err != nil {
+		a.log.Error("live flush failed", "err", err)
 	}
 }

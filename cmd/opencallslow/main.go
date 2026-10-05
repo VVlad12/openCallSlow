@@ -17,6 +17,7 @@ import (
 	"runtime"
 	"slices"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/opencallslow/opencallslow/internal/agg"
@@ -171,7 +172,9 @@ func run(log *slog.Logger, dataDir, addr string, doCapture bool) error {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	// SIGTERM is how Go reports the console window being closed on Windows;
+	// handling it gives us a few seconds to save pending data.
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
 	var wg sync.WaitGroup
@@ -181,10 +184,11 @@ func run(log *slog.Logger, dataDir, addr string, doCapture bool) error {
 	}
 
 	var (
-		mu         sync.Mutex
-		session    capture.Session
-		captureErr error
-		started    = time.Now()
+		mu          sync.Mutex
+		session     capture.Session
+		captureErr  error
+		beforeQuery func()
+		started     = time.Now()
 	)
 	if doCapture {
 		for _, d := range capture.SeedDNS() {
@@ -198,6 +202,7 @@ func run(log *slog.Logger, dataDir, addr string, doCapture bool) error {
 			log.Error("live capture unavailable — dashboard will only show stored data", "err", captureErr)
 		} else {
 			log.Info("capturing network traffic")
+			beforeQuery = func() { a.FlushThrottled(10 * time.Second) }
 			stop := make(chan struct{})
 			wg.Add(1)
 			go func() { defer wg.Done(); a.Run(15*time.Second, stop) }()
@@ -233,7 +238,7 @@ func run(log *slog.Logger, dataDir, addr string, doCapture bool) error {
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", addr, err)
 	}
-	srv := &http.Server{Handler: web.Handler(st, status, log), ReadHeaderTimeout: 5 * time.Second}
+	srv := &http.Server{Handler: web.Handler(st, status, beforeQuery, log), ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		<-ctx.Done()
 		shutdown, c := context.WithTimeout(context.Background(), 3*time.Second)

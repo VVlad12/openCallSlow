@@ -24,7 +24,9 @@ type Status struct {
 	DB           string `json:"db"`
 }
 
-func Handler(st *store.Store, status func() Status, log *slog.Logger) http.Handler {
+// Handler serves the dashboard. beforeQuery, if set, runs before traffic
+// queries (the collector uses it to write pending data first).
+func Handler(st *store.Store, status func() Status, beforeQuery func(), log *slog.Logger) http.Handler {
 	mux := http.NewServeMux()
 	static, _ := fs.Sub(dashboard.Files, ".")
 	mux.Handle("GET /", http.FileServerFS(static))
@@ -34,6 +36,9 @@ func Handler(st *store.Store, status func() Status, log *slog.Logger) http.Handl
 	})
 
 	mux.HandleFunc("GET /api/summary", func(w http.ResponseWriter, r *http.Request) {
+		if beforeQuery != nil {
+			beforeQuery()
+		}
 		q := r.URL.Query()
 		from, to, tz := rangeParams(r)
 		f := store.Filter{
