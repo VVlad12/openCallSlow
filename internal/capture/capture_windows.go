@@ -104,6 +104,7 @@ type winSession struct {
 	cons   *etw.Consumer
 	cancel context.CancelFunc
 	events atomic.Uint64
+	pkts   *packetSession // optional: names learned from packets
 }
 
 func start(h Handler, log *slog.Logger) (Session, error) {
@@ -200,6 +201,12 @@ func start(h Handler, log *slog.Logger) (Session, error) {
 		s.Stop()
 		return nil, fmt.Errorf("start ETW consumer: %w", err)
 	}
+	if ps, err := startPackets(h, log); err != nil {
+		log.Warn("packet-based name detection unavailable; domains rely on Windows DNS only", "err", err)
+	} else {
+		ws.pkts = ps
+		log.Info("packet-based name detection running (DNS responses and TLS server names only)")
+	}
 	return ws, nil
 }
 
@@ -224,10 +231,18 @@ func enable(s *etw.RealTimeSession, log *slog.Logger, p etw.Provider) error {
 }
 
 func (w *winSession) Stats() Stats {
-	return Stats{Events: w.events.Load(), LostEvents: uint64(w.cons.LostEvents)}
+	s := Stats{Events: w.events.Load(), LostEvents: uint64(w.cons.LostEvents)}
+	if w.pkts != nil {
+		s.PacketFrames, s.PacketNames = w.pkts.frames.Load(), w.pkts.names.Load()
+		s.PacketLost = uint64(w.pkts.cons.LostEvents)
+	}
+	return s
 }
 
 func (w *winSession) Stop() error {
+	if w.pkts != nil {
+		w.pkts.Stop()
+	}
 	w.cancel()
 	err := w.cons.Stop()
 	if serr := w.sess.Stop(); err == nil {
@@ -274,10 +289,6 @@ func parseQueryResults(s string) []netip.Addr {
 		}
 	}
 	return out
-}
-
-func normalizeName(s string) string {
-	return strings.TrimSuffix(strings.ToLower(strings.TrimSpace(s)), ".")
 }
 
 // localAddrs tracks this machine's interface addresses so we can tell the

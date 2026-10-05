@@ -208,6 +208,7 @@ func run(log *slog.Logger, dataDir, addr string, doCapture bool) error {
 			log.Error("live capture unavailable — dashboard will only show stored data", "err", captureErr)
 		} else {
 			log.Info("capturing network traffic")
+			a.CaptureStats = session.Stats
 			beforeQuery = func() { a.FlushThrottled(10 * time.Second) }
 			stop := make(chan struct{})
 			wg.Add(1)

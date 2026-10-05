@@ -6,6 +6,7 @@ package capture
 import (
 	"log/slog"
 	"net/netip"
+	"strings"
 )
 
 type Proto uint8
@@ -54,6 +55,8 @@ type Handler interface {
 type Stats struct {
 	Events     uint64
 	LostEvents uint64
+	// Packet-based name detection (frames inspected, names learned, dropped).
+	PacketFrames, PacketNames, PacketLost uint64
 }
 
 // Session is a running capture.
@@ -72,4 +75,8 @@ func Start(h Handler, log *slog.Logger) (Session, error) {
 // attributed to a domain. It is best effort and may return nothing.
 func SeedDNS() []DNSAnswer {
 	return seedDNS()
+}
+
+func normalizeName(s string) string {
+	return strings.TrimSuffix(strings.ToLower(strings.TrimSpace(s)), ".")
 }

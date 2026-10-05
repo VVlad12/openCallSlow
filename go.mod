@@ -25,3 +25,5 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
+
+replace www.velocidex.com/golang/go-ese => ./third_party/go-ese

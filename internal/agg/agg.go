@@ -43,6 +43,9 @@ type Aggregator struct {
 	withSite, withoutSite     atomic.Uint64 // internet bytes with / without a known domain
 	lastLive                  atomic.Int64  // unix nanos of the last FlushThrottled
 
+	// CaptureStats, if set, adds capture-level counters to the stats log.
+	CaptureStats func() capture.Stats
+
 	now func() time.Time
 }
 
@@ -178,10 +181,17 @@ func (a *Aggregator) logStats() {
 	if with+without > 0 {
 		share = float64(with) / float64(with+without) * 100
 	}
-	a.log.Info("capture stats",
-		"packets", a.packets.Swap(0), "dnsAnswers", a.dnsAnswers.Swap(0), "rowsWritten", a.rows.Swap(0),
-		"knownDNSAddrs", a.enr.DNS.Len(), "internetBytes", with+without,
-		"bytesWithDomainPct", fmt.Sprintf("%.0f", share))
+	args := []any{
+		"packets", a.packets.Swap(0), "nameAnswers", a.dnsAnswers.Swap(0), "rowsWritten", a.rows.Swap(0),
+		"knownDNSAddrs", a.enr.DNS.Len(), "internetBytes", with + without,
+		"bytesWithDomainPct", fmt.Sprintf("%.0f", share),
+	}
+	if a.CaptureStats != nil {
+		cs := a.CaptureStats()
+		args = append(args, "lostEvents", cs.LostEvents, "framesTotal", cs.PacketFrames,
+			"namesFromPacketsTotal", cs.PacketNames, "framesLostTotal", cs.PacketLost)
+	}
+	a.log.Info("capture stats", args...)
 }
 
 // FlushThrottled writes everything pending, at most once per interval. The

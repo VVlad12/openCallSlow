@@ -22,7 +22,14 @@ const (
 )
 
 // ImportFile reads a copy of SRUDB.dat and returns its network rows.
-func ImportFile(path string) ([]store.SrumRow, error) {
+func ImportFile(path string) (rows []store.SrumRow, err error) {
+	// The ESE parser works on a live, possibly inconsistent copy; turn any
+	// panic on a malformed page into an error.
+	defer func() {
+		if r := recover(); r != nil {
+			rows, err = nil, fmt.Errorf("parse SRUDB.dat: %v", r)
+		}
+	}()
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -53,7 +60,6 @@ func ImportFile(path string) ([]store.SrumRow, error) {
 		return nil, fmt.Errorf("read %s: %w", idMapTable, err)
 	}
 
-	var rows []store.SrumRow
 	err = cat.DumpTable(networkTable, func(row *ordereddict.Dict) error {
 		ts, ok := row.Get("TimeStamp")
 		t, isTime := ts.(time.Time)

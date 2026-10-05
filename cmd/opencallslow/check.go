@@ -85,7 +85,8 @@ func check(log *slog.Logger, dataDir string, d time.Duration) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	log.Info("check: summary", "etwEvents", stats.Events, "lostEvents", stats.LostEvents,
-		"packets", h.packets, "dnsAnswers", h.dnsHits, "flows", len(h.flows))
+		"packets", h.packets, "dnsAnswers", h.dnsHits, "flows", len(h.flows),
+		"frames", stats.PacketFrames, "namesFromPackets", stats.PacketNames, "framesLost", stats.PacketLost)
 
 	type row struct {
 		k       checkKey
