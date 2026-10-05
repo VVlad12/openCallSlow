@@ -108,7 +108,10 @@ type winSession struct {
 
 func start(h Handler, log *slog.Logger) (Session, error) {
 	s := etw.NewRealTimeSession(sessionName)
-	if err := s.EnableProvider(etw.Provider{
+	if err := s.Start(); err != nil {
+		return nil, fmt.Errorf("start ETW session (run as administrator): %w", err)
+	}
+	if err := enable(s, log, etw.Provider{
 		GUID:            kernelNetworkGUID,
 		Name:            "Microsoft-Windows-Kernel-Network",
 		EnableLevel:     0xff,
@@ -116,9 +119,9 @@ func start(h Handler, log *slog.Logger) (Session, error) {
 		Filter:          netEventIDs,
 	}); err != nil {
 		s.Stop()
-		return nil, fmt.Errorf("enable Kernel-Network provider (administrator rights required): %w", err)
+		return nil, err
 	}
-	if err := s.EnableProvider(etw.Provider{
+	if err := enable(s, log, etw.Provider{
 		GUID:            dnsClientGUID,
 		Name:            "Microsoft-Windows-DNS-Client",
 		EnableLevel:     0xff,
@@ -126,7 +129,7 @@ func start(h Handler, log *slog.Logger) (Session, error) {
 		Filter:          []uint16{dnsQueryCompleted},
 	}); err != nil {
 		s.Stop()
-		return nil, fmt.Errorf("enable DNS-Client provider: %w", err)
+		return nil, err
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -198,6 +201,26 @@ func start(h Handler, log *slog.Logger) (Session, error) {
 		return nil, fmt.Errorf("start ETW consumer: %w", err)
 	}
 	return ws, nil
+}
+
+// enable turns on a provider with kernel-side event-ID filtering, and falls
+// back to no filter when the provider rejects it (some Windows builds answer
+// "The parameter is incorrect"); the callbacks ignore unwanted events anyway.
+func enable(s *etw.RealTimeSession, log *slog.Logger, p etw.Provider) error {
+	err := s.EnableProvider(p)
+	if err == nil {
+		log.Debug("ETW provider enabled", "provider", p.Name, "eventFilter", true)
+		return nil
+	}
+	if len(p.Filter) == 0 {
+		return fmt.Errorf("enable %s: %w", p.Name, err)
+	}
+	log.Info("ETW provider rejected event filter, enabling without it", "provider", p.Name, "err", err)
+	p.Filter = nil
+	if err := s.EnableProvider(p); err != nil {
+		return fmt.Errorf("enable %s: %w", p.Name, err)
+	}
+	return nil
 }
 
 func (w *winSession) Stats() Stats {

@@ -72,8 +72,15 @@ function renderStatus(s) {
   } else {
     const viewOnly = (s.captureError || "").includes("serve mode");
     el.className = viewOnly ? "status" : "status off";
-    el.textContent = viewOnly ? "View only — not recording" : "Not recording (hover for details)";
+    el.textContent = viewOnly ? "View only — not recording" : "Not recording";
     el.title = s.captureError || "";
+  }
+  const banner = $("banner");
+  const failed = !s.capturing && !(s.captureError || "").includes("serve mode");
+  banner.hidden = !failed;
+  if (failed) {
+    banner.innerHTML = `<b>Traffic is not being recorded</b>The collector could not start live capture. ` +
+      `Make sure it runs from a terminal opened as administrator. Details: <code>${esc(s.captureError || "unknown error")}</code>`;
   }
 }
 

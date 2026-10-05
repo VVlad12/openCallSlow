@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -35,6 +36,9 @@ Commands:
   serve         serve the dashboard over existing data, without capturing
   import-srum   import Windows' hourly per-app history (needs administrator)
   update-ipdb   download the IP → network operator / country database
+  check         capture for 20 seconds and log what was seen (troubleshooting)
+
+The log is also written to opencallslow.log in the data directory.
 
 Flags:
 `
@@ -58,14 +62,20 @@ func main() {
 	fs.Parse(args)
 
 	level := slog.LevelInfo
-	if *verbose {
+	if *verbose || cmd == "check" {
 		level = slog.LevelDebug
 	}
-	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
-
 	if err := os.MkdirAll(*dataDir, 0o755); err != nil {
-		fatal(log, "create data directory", err)
+		fmt.Fprintln(os.Stderr, "create data directory:", err)
+		os.Exit(1)
 	}
+	var out io.Writer = os.Stderr
+	if f, err := openLog(filepath.Join(*dataDir, "opencallslow.log")); err == nil {
+		defer f.Close()
+		out = io.MultiWriter(os.Stderr, f)
+	}
+	log := slog.New(slog.NewTextHandler(out, &slog.HandlerOptions{Level: level}))
+	log.Info("openCallSlow starting", "command", cmd, "os", runtime.GOOS, "data", *dataDir)
 
 	var err error
 	switch cmd {
@@ -75,6 +85,8 @@ func main() {
 		err = run(log, *dataDir, *addr, false)
 	case "import-srum":
 		err = importSrumCmd(log, *dataDir, *srumFile)
+	case "check":
+		err = check(log, *dataDir, 20*time.Second)
 	case "update-ipdb":
 		var path string
 		if path, err = enrich.DownloadIPDB(context.Background(), *dataDir); err == nil {
@@ -90,6 +102,15 @@ func main() {
 	if err != nil {
 		fatal(log, cmd, err)
 	}
+}
+
+// openLog appends to the log file, starting afresh once it passes 5 MB.
+func openLog(path string) (*os.File, error) {
+	flags := os.O_CREATE | os.O_WRONLY | os.O_APPEND
+	if fi, err := os.Stat(path); err == nil && fi.Size() > 5<<20 {
+		flags |= os.O_TRUNC
+	}
+	return os.OpenFile(path, flags, 0o644)
 }
 
 func fatal(log *slog.Logger, what string, err error) {
