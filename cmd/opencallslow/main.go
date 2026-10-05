@@ -12,9 +12,11 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"slices"
 	"sync"
 	"syscall"
@@ -75,7 +77,11 @@ func main() {
 	var out io.Writer = os.Stderr
 	if f, err := openLog(filepath.Join(*dataDir, "opencallslow.log")); err == nil {
 		defer f.Close()
-		out = io.MultiWriter(os.Stderr, f)
+		// File first: a console paused by a click (QuickEdit) blocks writes
+		// to it, and the log file should still get every line.
+		out = io.MultiWriter(f, os.Stderr)
+		// Crashes print to stderr only; also keep them in the log file.
+		debug.SetCrashOutput(f, debug.CrashOptions{})
 	}
 	log := slog.New(slog.NewTextHandler(out, &slog.HandlerOptions{Level: level}))
 	log.Info("openCallSlow starting", "command", cmd, "os", runtime.GOOS, "data", *dataDir, "admin", isElevated())
@@ -214,7 +220,7 @@ func run(log *slog.Logger, dataDir, addr string, doCapture bool) error {
 				close(stop)
 			}()
 			wg.Add(1)
-			go func() { defer wg.Done(); keepSrum(ctx, log, dataDir, st) }()
+			go func() { defer wg.Done(); keepSrum(ctx, log, dataDir) }()
 		}
 	}
 
@@ -280,14 +286,23 @@ func keepIPDB(ctx context.Context, log *slog.Logger, dataDir string, enr *enrich
 	}
 }
 
-// keepSrum imports SRUM history now and every 6 hours while running.
-func keepSrum(ctx context.Context, log *slog.Logger, dataDir string, st *store.Store) {
+// keepSrum imports SRUM history now and every 6 hours while running. The
+// import runs as a child process: it parses an undocumented Windows
+// database, and a failure there must not take the collector down.
+func keepSrum(ctx context.Context, log *slog.Logger, dataDir string) {
+	exe, err := os.Executable()
+	if err != nil {
+		log.Warn("SRUM import disabled", "err", err)
+		return
+	}
 	for {
-		if n, err := importSrum(dataDir, "", st); err != nil {
-			log.Warn("SRUM import failed", "err", err)
-		} else {
-			log.Info("SRUM history imported", "rows", n)
+		run, cancel := context.WithTimeout(ctx, 10*time.Minute)
+		cmd := exec.CommandContext(run, exe, "import-srum", "-data", dataDir)
+		cmd.Stdin, cmd.Stdout, cmd.Stderr = nil, nil, nil // the child writes the log file itself
+		if err := cmd.Run(); err != nil && ctx.Err() == nil {
+			log.Warn("SRUM import process failed (details above in this log)", "err", err)
 		}
+		cancel()
 		select {
 		case <-ctx.Done():
 			return
